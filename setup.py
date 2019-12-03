@@ -5,7 +5,7 @@ import numpy as np
 
 extensions = [
     Extension("cy_ode", ["cy_ode.pyx"], 
-    define_macros=[('CYTHON_TRACE', '1')],
+    define_macros=[('CYTHON_TRACE_NOGIL', '1')],
     language='c++')
 ]
 

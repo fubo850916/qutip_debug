@@ -188,7 +188,7 @@ cdef void double_complex_to_MKL_Complex16_2d(
             a[ii * ncols + jj].real = b[ii * ncols + jj].real
             a[ii * ncols + jj].imag = b[ii * ncols + jj].imag
 
-
+@cython.binding(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cdef void spmm_c_mkl(
@@ -255,6 +255,9 @@ cdef void spmm_c_mkl(
 #    MKL_Complex16_to_double_complex_2d(&y_mkl[0,0],y,nrows,nrows) 
     cdef complex[:,::1] y_view2 = np.ascontiguousarray(y_mkl,dtype=complex)
     y = &y_view2[0,0]
+
+def spmm_c_mkl_sentinel():
+    pass
 
 @cython.binding(True)
 @cython.boundscheck(False)
@@ -433,7 +436,25 @@ cpdef cnp.ndarray[complex, ndim=1, mode="c"] cy_ode_rhs_single_aop_mkl_v2(
         out3.T.reshape(nrows*nrows,order='c')
     return out4
 
-def cy_ode_rhs_single_aop_mkl_v2sentinel():
+def cy_ode_rhs_single_aop_mkl_v2_sentinel():
     pass
 
-
+cpdef void run_cy_ode_rhs_single_aop_mkl(
+        double t,
+        complex[::1] rho,
+        int nrows,
+        complex[::1] H0KKpsdata,
+        int[::1] H0KKpsind,
+        int[::1] H0KKpsindptr,
+        complex[::1] Kdata,
+        int[::1] Kind,
+        int[::1] Kindptr,
+        complex[::1] Kpdata,
+        int[::1] Kpind,
+        int[::1] Kpindptr,
+        int N):
+    cdef size_t ii=0
+    cdef cnp.ndarray[complex, ndim=1, mode="c"] arr
+    while ii < N:
+        arr = cy_ode_rhs_single_aop_mkl(t,rho,nrows,H0KKpsdata,H0KKpsind,H0KKpsindptr,Kdata,Kind,Kindptr,Kpdata,Kpind,Kpindptr)
+        ii += 1
