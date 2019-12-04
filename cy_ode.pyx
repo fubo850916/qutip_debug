@@ -386,7 +386,7 @@ cpdef cnp.ndarray[complex, ndim=1, mode="c"] cy_ode_rhs_single_aop_mkl_v2(
         np.zeros((nrows,nrows), dtype=complex,order='c')
     #spmm_c_mkl(H0KKpsdata,H0KKpsind,H0KKpsindptr,nrows,nrows,&rho2d[0,0],&out1[0,0])
     #Now Let's expand this function here.
-    cdef sparse_matrix_t A_mkl
+    cdef sparse_matrix_t H0KKps_mkl
     cdef sparse_operation_t operation
     cdef sparse_layout_t layout
     cdef matrix_descr descr
@@ -439,6 +439,9 @@ cpdef cnp.ndarray[complex, ndim=1, mode="c"] cy_ode_rhs_single_aop_mkl_v2(
 def cy_ode_rhs_single_aop_mkl_v2_sentinel():
     pass
 
+@cython.binding(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
 cpdef void run_cy_ode_rhs_single_aop_mkl(
         double t,
         complex[::1] rho,
@@ -455,6 +458,12 @@ cpdef void run_cy_ode_rhs_single_aop_mkl(
         int N):
     cdef size_t ii=0
     cdef cnp.ndarray[complex, ndim=1, mode="c"] arr
+    arr = cy_ode_rhs_single_aop_mkl(t,rho,nrows,H0KKpsdata,H0KKpsind,H0KKpsindptr,Kdata,Kind,Kindptr,Kpdata,Kpind,Kpindptr)
+    arr = cy_ode_rhs_single_aop_mkl(t,rho,nrows,H0KKpsdata,H0KKpsind,H0KKpsindptr,Kdata,Kind,Kindptr,Kpdata,Kpind,Kpindptr)
+
     while ii < N:
         arr = cy_ode_rhs_single_aop_mkl(t,rho,nrows,H0KKpsdata,H0KKpsind,H0KKpsindptr,Kdata,Kind,Kindptr,Kpdata,Kpind,Kpindptr)
         ii += 1
+
+def run_cy_ode_rhs_single_aop_mkl_sentinel():
+    pass

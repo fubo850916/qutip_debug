@@ -1,0 +1,93 @@
+Timer unit: 1e-06 s
+
+Total time: 0.010273 s
+File: cy_ode.pyx
+Function: cy_ode_rhs_single_aop_mkl at line 265
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+   265                                           cpdef cnp.ndarray[complex, ndim=1, mode="c"] cy_ode_rhs_single_aop_mkl(
+   266                                                   double t,
+   267                                                   complex[::1] rho,
+   268                                                   int nrows,
+   269                                                   complex[::1] H0KKpsdata,
+   270                                                   int[::1] H0KKpsind,
+   271                                                   int[::1] H0KKpsindptr,
+   272                                                   complex[::1] Kdata,
+   273                                                   int[::1] Kind,
+   274                                                   int[::1] Kindptr,
+   275                                                   complex[::1] Kpdata,
+   276                                                   int[::1] Kpind,
+   277                                                   int[::1] Kpindptr):
+   278                                           
+   279                                               #reshape the 1d rho into 2d rho
+   280                                               cdef cnp.ndarray[complex, ndim=1, mode="c"] rho_ndarray = \
+   281         1         44.0     44.0      0.4          np.asarray(rho,dtype=complex,order='c')
+   282                                               cdef cnp.ndarray[complex, ndim=2, mode="c"] rho2d = \
+   283         1         49.0     49.0      0.5          np.ascontiguousarray(rho_ndarray.reshape((nrows,nrows),order='c').T,dtype=complex)
+   284                                               #compute the product of -iH0-KKp with rho2d
+   285                                               cdef cnp.ndarray[complex, ndim=2, mode="c"] out1 = \
+   286         1         26.0     26.0      0.3          np.zeros((nrows,nrows), dtype=complex,order='c')
+   287         1       9051.0   9051.0     88.1      spmm_c_mkl(H0KKpsdata,H0KKpsind,H0KKpsindptr,nrows,nrows,&rho2d[0,0],&out1[0,0])
+   288                                               #compute the product rho2d*K in its adjoint form,i.e.,
+   289                                               #(rho2d*K).dag()=K*rho2d
+   290                                               cdef cnp.ndarray[complex, ndim=2, mode="c"] out2 = \
+   291         1        119.0    119.0      1.2          np.zeros((nrows,nrows), dtype=complex,order='c')
+   292         1        177.0    177.0      1.7      spmm_c_mkl(Kdata,Kind,Kindptr,nrows,nrows,&rho2d[0,0],&out2[0,0])
+   293                                           #    spmmpy_c(Kdata,Kind,Kindptr,rho2d,1.0,out2)
+   294                                               ##Calculate Kp*rho2d*K
+   295                                               cdef cnp.ndarray[complex, ndim=2, mode="c"] AdjointOut2 = \
+   296         1        315.0    315.0      3.1           np.ascontiguousarray(np.transpose(out2).conjugate(),dtype=complex)# out2.T.copy(order='C')
+   297         1        156.0    156.0      1.5      spmm_c_mkl(Kpdata,Kpind,Kpindptr,nrows,nrows,&AdjointOut2[0,0],&out1[0,0])
+   298                                           #    spmmpy_c(Kpdata,Kpind,Kpindptr,AdjointOut2,1.0,out1)
+   299                                               #compute the adjoint of out1 and add it to out1
+   300                                               cdef cnp.ndarray[complex, ndim=2, mode="c"] AdjointOut1 = \
+   301         1        166.0    166.0      1.6           np.ascontiguousarray(np.transpose(out1).conjugate(),dtype=complex)
+   302         1         28.0     28.0      0.3      cdef cnp.ndarray[complex, ndim=2, mode="c"] out3 = out1 + AdjointOut1
+   303                                               cdef cnp.ndarray[complex, ndim=1, mode="c"] out4 = \
+   304         1        131.0    131.0      1.3          out3.T.reshape(nrows*nrows,order='c')
+   305         1         11.0     11.0      0.1      return out4
+   306                                           
+   307                                           def cy_ode_rhs_single_aop_mkl_sentinel():
+   308                                               pass
+
+Tue Dec  3 12:36:48 2019    Profile.prof
+
+         528056 function calls in 25.112 seconds
+
+   Ordered by: internal time
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+     6000   24.115    0.004   24.408    0.004 cy_ode.pyx:194(spmm_c_mkl)
+     2000    0.426    0.000   25.105    0.013 cy_ode.pyx:265(cy_ode_rhs_single_aop_mkl)
+    32000    0.301    0.000    0.308    0.000 {built-in method numpy.core.multiarray.array}
+    62010    0.056    0.000    0.071    0.000 stringsource:344(__cinit__)
+    26000    0.045    0.000    0.069    0.000 stringsource:994(memoryview_fromslice)
+    30000    0.024    0.000    0.325    0.000 numeric.py:556(ascontiguousarray)
+    36010    0.018    0.000    0.070    0.000 stringsource:652(memoryview_cwrapper)
+    12000    0.015    0.000    0.033    0.000 stringsource:243(array_cwrapper)
+    62010    0.014    0.000    0.014    0.000 stringsource:371(__dealloc__)
+    12000    0.013    0.000    0.019    0.000 stringsource:121(__cinit__)
+     6000    0.012    0.000    0.012    0.000 cy_ode.pyx:120(to_mkl_matrix)
+    62010    0.011    0.000    0.011    0.000 stringsource:297(align_pointer)
+    26000    0.007    0.000    0.011    0.000 stringsource:971(__dealloc__)
+    26000    0.007    0.000    0.007    0.000 stringsource:513(__getbuffer__)
+     4000    0.006    0.000    0.011    0.000 fromnumeric.py:49(_wrapfunc)
+        1    0.006    0.006   25.111   25.111 cy_ode.pyx:442(run_cy_ode_rhs_single_aop_mkl)
+    12000    0.006    0.000    0.006    0.000 stringsource:1183(fill_contig_strides_array)
+    12000    0.004    0.000    0.004    0.000 stringsource:184(__getbuffer__)
+    12000    0.004    0.000    0.004    0.000 stringsource:1459(format_from_typeinfo)
+     4000    0.004    0.000    0.015    0.000 fromnumeric.py:552(transpose)
+    36010    0.004    0.000    0.004    0.000 stringsource:658(memoryview_check)
+    26000    0.003    0.000    0.003    0.000 stringsource:554(__get__)
+     4000    0.003    0.000    0.003    0.000 {method 'transpose' of 'numpy.ndarray' objects}
+     2000    0.002    0.000    0.009    0.000 numeric.py:433(asarray)
+    12000    0.002    0.000    0.002    0.000 stringsource:210(__dealloc__)
+     4000    0.002    0.000    0.002    0.000 {built-in method builtins.getattr}
+        1    0.000    0.000   25.112   25.112 {built-in method builtins.exec}
+        1    0.000    0.000   25.112   25.112 cy_ode.pyx:442(run_cy_ode_rhs_single_aop_mkl (wrapper))
+        1    0.000    0.000   25.112   25.112 {built-in method cy_ode.run_cy_ode_rhs_single_aop_mkl}
+        1    0.000    0.000   25.112   25.112 <string>:1(<module>)
+        1    0.000    0.000    0.000    0.000 {method 'disable' of '_lsprof.Profiler' objects}
+
+
