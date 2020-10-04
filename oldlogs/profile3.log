@@ -1,0 +1,164 @@
+3892
+4133
+2620
+Timer unit: 1e-06 s
+
+Total time: 0.00101 s
+File: cy_ode.pyx
+Function: cy_ode_rhs_single_aop_mkl_v2 at line 364
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+   364                                           cpdef cnp.ndarray[complex, ndim=1, mode="c"] cy_ode_rhs_single_aop_mkl_v2(
+   365                                                   double t,
+   366                                                   complex[::1] rho,
+   367                                                   int nrows,
+   368                                                   complex[::1] H0KKpsdata,
+   369                                                   int[::1] H0KKpsind,
+   370                                                   int[::1] H0KKpsindptr,
+   371                                                   complex[::1] Kdata,
+   372                                                   int[::1] Kind,
+   373                                                   int[::1] Kindptr,
+   374                                                   complex[::1] Kpdata,
+   375                                                   int[::1] Kpind,
+   376                                                   int[::1] Kpindptr):
+   377                                               cdef MKL_Complex16 alpha
+   378         1          2.0      2.0      0.2      alpha.real = 1.0
+   379         1          1.0      1.0      0.1      alpha.imag = 0.0
+   380                                               cdef MKL_Complex16 beta
+   381         1          1.0      1.0      0.1      beta.real = 1.0
+   382         1          1.0      1.0      0.1      beta.imag = 0.0
+   383                                               #reshape the 1d rho into 2d rho
+   384                                               cdef cnp.ndarray[complex, ndim=1, mode="c"] rho_ndarray = \
+   385         1         36.0     36.0      3.6          np.asarray(rho,dtype=complex,order='c')
+   386                                               cdef cnp.ndarray[complex, ndim=2, mode="c"] rho2d = \
+   387         1         97.0     97.0      9.6          np.ascontiguousarray(rho_ndarray.reshape((nrows,nrows),order='c').T,dtype=complex)
+   388                                               #compute the product of -iH0-KKp with rho2d
+   389                                               cdef cnp.ndarray[complex, ndim=2, mode="c"] out1 = \
+   390         1         35.0     35.0      3.5          np.zeros((nrows,nrows), dtype=complex,order='c')
+   391                                               #spmm_c_mkl(H0KKpsdata,H0KKpsind,H0KKpsindptr,nrows,nrows,&rho2d[0,0],&out1[0,0])
+   392                                               #Now Let's expand this function here.
+   393                                               cdef sparse_matrix_t H0KKps_mkl
+   394                                               cdef sparse_operation_t H0KKps_operation
+   395                                               cdef sparse_layout_t H0KKps_layout
+   396                                               cdef matrix_descr H0KKps_descr
+   397         1          1.0      1.0      0.1  #    cdef MKL_INT ldx = nrows
+   398         1          0.0      0.0      0.0  #    cdef MKL_INT ldy = nrows
+   399         1          0.0      0.0      0.0  #    cdef size_t nnz = H0KKpsdata.shape[0]
+   400         1         30.0     30.0      3.0      cdef MKL_Complex16[::1] H0KKpsdata_mkl = np.ascontiguousarray(H0KKpsdata,dtype=complex)
+   401                                           #    cdef MKL_Complex16[::1] A_data_mkl = np.zeros((nnz,), dtype=np.complex128,order='c') 
+   402                                           #    cdef int ndata = H0KKpsdata.shape[0]
+   403                                           #    double_complex_to_MKL_Complex16_1d(&A_data_mkl[0],&H0KKpsdata[0],ndata)
+   404         1          6.0      6.0      0.6      H0KKps_mkl = to_mkl_matrix(H0KKpsdata_mkl,H0KKpsind,H0KKpsindptr,nrows,nrows)
+   405         1          0.0      0.0      0.0      H0KKps_operation = SPARSE_OPERATION_NON_TRANSPOSE
+   406         1          0.0      0.0      0.0      H0KKps_layout = SPARSE_LAYOUT_ROW_MAJOR
+   407         1          0.0      0.0      0.0      H0KKps_descr.type = SPARSE_MATRIX_TYPE_GENERAL
+   408         1          1.0      1.0      0.1      H0KKps_descr.diag = SPARSE_DIAG_NON_UNIT
+   409                                           
+   410         1          5.0      5.0      0.5      cdef MKL_Complex16[:,::1] rho2d_mkl = rho2d #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+   411         1          6.0      6.0      0.6      cdef MKL_Complex16[:,::1] out1_mkl = out1 #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+   412                                           
+   413                                           #    double_complex_to_MKL_Complex16_2d(&x_mkl[0,0],&rho2d[0,0],nrows,nrows)
+   414                                           #    double_complex_to_MKL_Complex16_2d(&y_mkl[0,0],&out1[0,0],nrows,nrows)
+   415         1         88.0     88.0      8.7      mkl_sparse_z_mm(H0KKps_operation,alpha,H0KKps_mkl,H0KKps_descr,H0KKps_layout,&rho2d_mkl[0,0],nrows,nrows,beta,&out1_mkl[0,0],nrows)
+   416                                           #    MKL_Complex16_to_double_complex_2d(&y_mkl[0,0],&out1[0,0],nrows,nrows) 
+   417                                           #    out1 =  np.ascontiguousarray(out1_mkl,dtype=complex)
+   418                                           
+   419                                           
+   420                                               #compute the product rho2d*K in its adjoint form,i.e.,(rho2d*K).dag()=K*rho2d
+   421                                               cdef cnp.ndarray[complex, ndim=2, mode="c"] out2 = \
+   422         1         37.0     37.0      3.7          np.zeros((nrows,nrows), dtype=complex,order='c')
+   423                                           #    spmm_c_mkl(Kdata,Kind,Kindptr,nrows,nrows,&rho2d[0,0],&out2[0,0])
+   424                                               #Now Let's expand this function here.
+   425                                               cdef sparse_matrix_t K_mkl
+   426                                               cdef sparse_operation_t K_operation
+   427                                               cdef sparse_layout_t K_layout
+   428                                               cdef matrix_descr K_descr
+   429         1         26.0     26.0      2.6      cdef MKL_Complex16[::1] Kdata_mkl = np.ascontiguousarray(Kdata,dtype=complex)
+   430         1          4.0      4.0      0.4      K_mkl = to_mkl_matrix(Kdata_mkl,Kind,Kindptr,nrows,nrows)
+   431         1          1.0      1.0      0.1      K_operation = SPARSE_OPERATION_NON_TRANSPOSE
+   432         1          1.0      1.0      0.1      K_layout = SPARSE_LAYOUT_ROW_MAJOR
+   433         1          1.0      1.0      0.1      K_descr.type = SPARSE_MATRIX_TYPE_GENERAL
+   434         1          1.0      1.0      0.1      K_descr.diag = SPARSE_DIAG_NON_UNIT
+   435                                           
+   436                                           #    cdef MKL_Complex16[:,::1] rho2d_mkl = rho2d #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+   437         1          7.0      7.0      0.7      cdef MKL_Complex16[:,::1] out2_mkl = out2 #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+   438                                           
+   439         1         65.0     65.0      6.4      mkl_sparse_z_mm(K_operation,alpha,K_mkl,K_descr,K_layout,&rho2d_mkl[0,0],nrows,nrows,beta,&out2_mkl[0,0],nrows)
+   440         1         21.0     21.0      2.1      out2 =  np.ascontiguousarray(out2_mkl,dtype=complex)
+   441                                           '''
+   442                                           The conversion from out2_mkl to AdjointOut_mkl can be carried using a single step,i.e., in-place or out-place matrix copy, mkl_?imatcopy
+   443                                           '''
+   444         1        164.0    164.0     16.2  
+   445                                               ##Calculate Kp*rho2d*K
+   446                                               cdef cnp.ndarray[complex, ndim=2, mode="c"] AdjointOut2 = \
+   447                                                    np.ascontiguousarray(np.transpose(out2).conjugate(),dtype=complex)
+   448                                           #    spmm_c_mkl(Kpdata,Kpind,Kpindptr,nrows,nrows,&AdjointOut2[0,0],&out1[0,0])
+   449                                               #Now Let's expand this function here.
+   450                                               cdef sparse_matrix_t Kp_mkl
+   451         1         23.0     23.0      2.3      cdef sparse_operation_t Kp_operation
+   452         1          4.0      4.0      0.4      cdef sparse_layout_t Kp_layout
+   453         1          0.0      0.0      0.0      cdef matrix_descr Kp_descr
+   454         1          0.0      0.0      0.0      cdef MKL_Complex16[::1] Kpdata_mkl = np.ascontiguousarray(Kpdata,dtype=complex)
+   455         1          0.0      0.0      0.0      Kp_mkl = to_mkl_matrix(Kpdata_mkl,Kpind,Kpindptr,nrows,nrows)
+   456         1          0.0      0.0      0.0      Kp_operation = SPARSE_OPERATION_NON_TRANSPOSE
+   457                                               Kp_layout = SPARSE_LAYOUT_ROW_MAJOR
+   458         1          4.0      4.0      0.4      Kp_descr.type = SPARSE_MATRIX_TYPE_GENERAL
+   459                                               Kp_descr.diag = SPARSE_DIAG_NON_UNIT
+   460                                           
+   461         1         55.0     55.0      5.4      cdef MKL_Complex16[:,::1] AdjointOut2_mkl = AdjointOut2 #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+   462         1         17.0     17.0      1.7  #    cdef MKL_Complex16[:,::1] out1_mkl = out1 #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+   463                                           
+   464                                               mkl_sparse_z_mm(Kp_operation,alpha,Kp_mkl,Kp_descr,Kp_layout,&AdjointOut2_mkl[0,0],nrows,nrows,beta,&out1_mkl[0,0],nrows)
+   465                                               out1 =  np.ascontiguousarray(out1_mkl,dtype=complex)
+   466         1        127.0    127.0     12.6  
+   467         1         55.0     55.0      5.4      #compute the adjoint of out1 and add it to out1
+   468                                               cdef cnp.ndarray[complex, ndim=2, mode="c"] AdjointOut1 = \
+   469         1         49.0     49.0      4.9           np.ascontiguousarray(np.transpose(out1).conjugate(),dtype=complex)
+   470         1         38.0     38.0      3.8      cdef cnp.ndarray[complex, ndim=2, mode="c"] out3 = out1 + AdjointOut1
+   471                                               cdef cnp.ndarray[complex, ndim=1, mode="c"] out4 = \
+   472                                                   out3.T.reshape(nrows*nrows,order='c')
+   473                                               return out4
+   474                                           
+   475                                           def cy_ode_rhs_single_aop_mkl_v2_sentinel():
+   476                                               pass
+
+True
+Fri Dec  6 08:12:30 2019    Profile.prof
+
+         528583 function calls (528582 primitive calls) in 13.505 seconds
+
+   Ordered by: internal time
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+     6006   12.068    0.002   12.411    0.002 cy_ode.pyx:194(spmm_c_mkl)
+     2002    0.662    0.000   13.497    0.007 cy_ode.pyx:265(cy_ode_rhs_single_aop_mkl)
+    32032    0.453    0.000    0.462    0.000 {built-in method numpy.core.multiarray.array}
+    62072    0.064    0.000    0.080    0.000 stringsource:344(__cinit__)
+    26026    0.057    0.000    0.084    0.000 stringsource:994(memoryview_fromslice)
+    30030    0.031    0.000    0.482    0.000 numeric.py:556(ascontiguousarray)
+    36046    0.021    0.000    0.077    0.000 stringsource:652(memoryview_cwrapper)
+    12012    0.019    0.000    0.041    0.000 stringsource:243(array_cwrapper)
+    12012    0.016    0.000    0.023    0.000 stringsource:121(__cinit__)
+    62072    0.015    0.000    0.015    0.000 stringsource:371(__dealloc__)
+     6006    0.014    0.000    0.014    0.000 cy_ode.pyx:120(to_mkl_matrix)
+    62072    0.011    0.000    0.011    0.000 stringsource:297(align_pointer)
+    26026    0.009    0.000    0.009    0.000 stringsource:513(__getbuffer__)
+     4004    0.008    0.000    0.014    0.000 fromnumeric.py:49(_wrapfunc)
+    26026    0.008    0.000    0.011    0.000 stringsource:971(__dealloc__)
+      2/1    0.007    0.004   13.505   13.505 cy_ode.pyx:478(run_cy_ode_rhs_single_aop_mkl)
+    12012    0.007    0.000    0.007    0.000 stringsource:1183(fill_contig_strides_array)
+     4004    0.006    0.000    0.020    0.000 fromnumeric.py:552(transpose)
+    12012    0.006    0.000    0.006    0.000 stringsource:184(__getbuffer__)
+    12012    0.006    0.000    0.006    0.000 stringsource:1459(format_from_typeinfo)
+    36046    0.005    0.000    0.005    0.000 stringsource:658(memoryview_check)
+     2002    0.003    0.000    0.014    0.000 numeric.py:433(asarray)
+     4004    0.003    0.000    0.003    0.000 {method 'transpose' of 'numpy.ndarray' objects}
+     4004    0.003    0.000    0.003    0.000 {built-in method builtins.getattr}
+    26026    0.003    0.000    0.003    0.000 stringsource:554(__get__)
+    12012    0.002    0.000    0.002    0.000 stringsource:210(__dealloc__)
+        1    0.000    0.000   13.505   13.505 {built-in method builtins.exec}
+        1    0.000    0.000   13.505   13.505 <string>:1(<module>)
+        1    0.000    0.000    0.000    0.000 {method 'disable' of '_lsprof.Profiler' objects}
+
+

@@ -6,8 +6,10 @@ cimport numpy as cnp
 cimport cython
 cimport libc.math
 from libcpp cimport bool
-from qutip.cy.spmatfuncs import spmmpy_c
+#from qutip.cy.spmatfuncs import spmmpy_c
 import line_profiler
+
+include "complex_math.pxi"
 
 cdef extern from "src/zspmv.hpp" nogil:
     void zspmvpy(double complex *data, int *ind, int *ptr, double complex *vec,
@@ -102,9 +104,56 @@ cdef extern from "mkl.h" nogil:
                                                    MKL_INT             *col_indx,
                                                    MKL_Complex16       *values )
 #                                                   double complex       *values )
+    sparse_status_t mkl_sparse_z_spmmd( sparse_operation_t        operation,
+                                        const sparse_matrix_t     A,
+                                        const sparse_matrix_t     B,
+                                        sparse_layout_t           layout,
+                                        MKL_Complex16              *C,
+                                        MKL_INT                   ldc)
+    void cblas_zdotu_sub(const MKL_INT                            n,
+                         const void                               *x,
+                         const MKL_INT                            incx,
+                         const void                               *y,
+                         const MKL_INT                            incy,
+                         void                                     *dotu)        
+    void cblas_zdotui_sub(const MKL_INT                           nz,
+                          const void                              *x,
+                          const MKL_INT                           *indx,
+                          const void                              *y,
+                          void                                    *dotui)
+    void mkl_zimatcopy(   const char                              ordering,
+                          const char                              trans,                 
+                          size_t                                  rows,
+                          size_t                                  cols,
+                          const MKL_Complex16                     alpha,
+                          MKL_Complex16                           *AB,
+                          size_t                                  lda,
+                          size_t                                  ldb)
+    void mkl_zomatcopy(   const char                              ordering,
+                          const char                              trans,                 
+                          size_t                                  rows,
+                          size_t                                  cols,
+                          const MKL_Complex16                     alpha,
+                          MKL_Complex16                           *A,
+                          size_t                                  lda,
+                          MKL_Complex16                           *B,
+                          size_t                                  ldb)
+    void mkl_zomatadd(    char                                    ordering,
+                          char                                    transa,
+                          char                                    transb,
+                          size_t                                  m,
+                          size_t                                  n,
+                          const MKL_Complex16                     alpha,
+                          const MKL_Complex16                     *A,
+                          size_t                                  lda,
+                          const MKL_Complex16                     beta,
+                          const MKL_Complex16                     *B,
+                          size_t                                  ldb,
+                          MKL_Complex16                           *C,
+                          size_t                                  ldc)
+    sparse_status_t mkl_sparse_destroy(sparse_matrix_t A)
  
- 
-include "complex_math.pxi"
+#include "complex_math.pxi"
 
 #from Cython.Compiler.Options import directive_defaults
 #directive_defaults['linetrace'] = True
@@ -113,7 +162,54 @@ include "complex_math.pxi"
 class MKLCallError(Exception):
    pass
 
+#functions from qutip
+@cython.binding(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef void _spmm_c_py(complex* data, int* ind, int* ptr,
+            complex* mat, complex a, complex* out,
+            unsigned int sp_rows, unsigned int nrows, unsigned int ncols):
+    """
+    sparse*dense "C" ordered.
+    """
+    cdef int row, col, ii, jj, row_start, row_end
+    for row from 0 <= row < sp_rows :
+        row_start = ptr[row]
+        row_end = ptr[row+1]
+        for jj from row_start <= jj < row_end:
+            for col in range(ncols):
+                out[row * ncols + col] += a*data[jj]*mat[ind[jj] * ncols + col]
 
+@cython.binding(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef void spmmpy_c(complex[::1] data, int[::1] ind, int[::1] ptr,
+             complex[:,::1] M, complex a, complex[:,::1] out):
+    """
+    Sparse matrix, c ordered dense matrix multiplication.
+    The sparse matrix must be in CSR format and have complex entries.
+    Parameters
+    ----------
+    data : array
+        Data for sparse matrix.
+    idx : array
+        Indices for sparse matrix data.
+    ptr : array
+        Pointers for sparse matrix data.
+    mat : array 2d
+        Dense matrix for multiplication.  Must be in c mode.
+    alpha : complex
+        Numerical coefficient for sparse matrix.
+    out: array
+        Output array. Must be in c mode.
+    """
+    cdef unsigned int sp_rows = ptr.shape[0]-1
+    cdef unsigned int nrows = M.shape[0]
+    cdef unsigned int ncols = M.shape[1]
+    _spmm_c_py(&data[0], &ind[0], &ptr[0], &M[0,0], 1.,
+               &out[0,0], sp_rows, nrows, ncols)
+
+#helper functions for mkl
 @cython.binding(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -175,6 +271,7 @@ cdef void MKL_Complex16_to_double_complex_2d(
         for jj in range(ncols):
             b[ii * ncols + jj].real = a[ii * ncols + jj].real
             b[ii * ncols + jj].imag = a[ii * ncols + jj].imag
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cdef void double_complex_to_MKL_Complex16_2d(
@@ -214,9 +311,9 @@ cdef void spmm_c_mkl(
     cdef MKL_Complex16 beta
     beta.real = 1.0
     beta.imag = 0.0
-    cdef MKL_INT ldx = nrows
-    cdef MKL_INT ldy = nrows
-    cdef size_t nnz = A_data.shape[0]
+#    cdef MKL_INT ldx = nrows
+#    cdef MKL_INT ldy = nrows
+#    cdef size_t nnz = A_data.shape[0]
 #    cdef MKL_Complex16 * A_data_mkl_buffer = <MKL_Complex16 *>PyDataMem_NEW(nnz*sizeof(MKL_Complex16))
 #    cdef MKL_Complex16[::1] A_data_mkl = <MKL_Complex16[:nnz]>A_data_mkl_buffer
 #    cdef MKL_Complex16[::1] A_data_mkl = <MKL_Complex16 * >PyDataMem_NEW(nnz*sizeof(MKL_Complex16))
@@ -259,6 +356,7 @@ cdef void spmm_c_mkl(
 def spmm_c_mkl_sentinel():
     pass
 
+## different versions of cy_ode_rhs functions
 @cython.binding(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -277,10 +375,8 @@ cpdef cnp.ndarray[complex, ndim=1, mode="c"] cy_ode_rhs_single_aop_mkl(
         int[::1] Kpindptr):
 
     #reshape the 1d rho into 2d rho
-    cdef cnp.ndarray[complex, ndim=1, mode="c"] rho_ndarray = \
-        np.asarray(rho,dtype=complex,order='c')
     cdef cnp.ndarray[complex, ndim=2, mode="c"] rho2d = \
-        np.ascontiguousarray(rho_ndarray.reshape((nrows,nrows),order='c').T,dtype=complex)
+        np.ascontiguousarray(rho,dtype=complex).reshape((nrows,nrows),order='c')
     #compute the product of -iH0-KKp with rho2d
     cdef cnp.ndarray[complex, ndim=2, mode="c"] out1 = \
         np.zeros((nrows,nrows), dtype=complex,order='c')
@@ -301,13 +397,11 @@ cpdef cnp.ndarray[complex, ndim=1, mode="c"] cy_ode_rhs_single_aop_mkl(
          np.ascontiguousarray(np.transpose(out1).conjugate(),dtype=complex)
     cdef cnp.ndarray[complex, ndim=2, mode="c"] out3 = out1 + AdjointOut1
     cdef cnp.ndarray[complex, ndim=1, mode="c"] out4 = \
-        out3.T.reshape(nrows*nrows,order='c')
+        out3.reshape(nrows*nrows,order='c')
     return out4
 
 def cy_ode_rhs_single_aop_mkl_sentinel():
     pass
-
-
 
 @cython.binding(True)
 @cython.boundscheck(False)
@@ -374,70 +468,129 @@ cpdef cnp.ndarray[complex, ndim=1, mode="c"] cy_ode_rhs_single_aop_mkl_v2(
         complex[::1] Kpdata,
         int[::1] Kpind,
         int[::1] Kpindptr):
-
-    cdef unsigned int nrows2 = nrows*nrows
-    #reshape the 1d rho into 2d rho
-    cdef cnp.ndarray[complex, ndim=1, mode="c"] rho_ndarray = \
-        np.asarray(rho,dtype=complex,order='c')
-    cdef cnp.ndarray[complex, ndim=2, mode="c"] rho2d = \
-        np.ascontiguousarray(rho_ndarray.reshape((nrows,nrows),order='c').T,dtype=complex)
-    #compute the product of -iH0-KKp with rho2d
-    cdef cnp.ndarray[complex, ndim=2, mode="c"] out1 = \
-        np.zeros((nrows,nrows), dtype=complex,order='c')
-    #spmm_c_mkl(H0KKpsdata,H0KKpsind,H0KKpsindptr,nrows,nrows,&rho2d[0,0],&out1[0,0])
-    #Now Let's expand this function here.
-    cdef sparse_matrix_t H0KKps_mkl
-    cdef sparse_operation_t operation
-    cdef sparse_layout_t layout
-    cdef matrix_descr descr
     cdef MKL_Complex16 alpha
     alpha.real = 1.0
     alpha.imag = 0.0
     cdef MKL_Complex16 beta
     beta.real = 1.0
     beta.imag = 0.0
-    cdef MKL_INT ldx = nrows
-    cdef MKL_INT ldy = nrows
-    cdef size_t nnz = H0KKpsdata.shape[0]
-    cdef MKL_Complex16[::1] A_data_mkl = np.ascontiguousarray(H0KKpsdata,dtype=complex)
+    #reshape the 1d rho into 2d rho,the 1d rho here has been in c-order, 
+    cdef cnp.ndarray[complex, ndim=2, mode="c"] rho2d = \
+        np.ascontiguousarray(rho,dtype=complex).reshape((nrows,nrows),order='c')
+#        np.asarray(rho,dtype=complex,order='c').reshape((nrows,nrows),order='c')
+    #compute the product of -iH0-KKp with rho2d
+    cdef cnp.ndarray[complex, ndim=2, mode="c"] out1 = \
+        np.zeros((nrows,nrows), dtype=complex,order='c')
+    #spmm_c_mkl(H0KKpsdata,H0KKpsind,H0KKpsindptr,nrows,nrows,&rho2d[0,0],&out1[0,0])
+    #Now Let's expand this function here.
+    cdef sparse_matrix_t H0KKps_mkl
+    cdef sparse_operation_t H0KKps_operation
+    cdef sparse_layout_t H0KKps_layout
+    cdef matrix_descr H0KKps_descr
+#    cdef MKL_INT ldx = nrows
+#    cdef MKL_INT ldy = nrows
+#    cdef size_t nnz = H0KKpsdata.shape[0]
+    cdef MKL_Complex16[::1] H0KKpsdata_mkl = np.ascontiguousarray(H0KKpsdata,dtype=complex)
 #    cdef MKL_Complex16[::1] A_data_mkl = np.zeros((nnz,), dtype=np.complex128,order='c') 
 #    cdef int ndata = H0KKpsdata.shape[0]
 #    double_complex_to_MKL_Complex16_1d(&A_data_mkl[0],&H0KKpsdata[0],ndata)
-    
-    A_mkl = to_mkl_matrix(A_data_mkl,H0KKpsind,H0KKpsindptr,nrows,nrows)
-    operation = SPARSE_OPERATION_NON_TRANSPOSE
-    layout = SPARSE_LAYOUT_ROW_MAJOR
-    descr.type = SPARSE_MATRIX_TYPE_GENERAL
-    descr.diag = SPARSE_DIAG_NON_UNIT
-    
-    cdef MKL_Complex16[:,::1] x_mkl = rho2d #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
-    cdef MKL_Complex16[:,::1] y_mkl = out1 #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+    H0KKps_mkl = to_mkl_matrix(H0KKpsdata_mkl,H0KKpsind,H0KKpsindptr,nrows,nrows)
+    H0KKps_operation = SPARSE_OPERATION_NON_TRANSPOSE
+    H0KKps_layout = SPARSE_LAYOUT_ROW_MAJOR
+    H0KKps_descr.type = SPARSE_MATRIX_TYPE_GENERAL
+    H0KKps_descr.diag = SPARSE_DIAG_NON_UNIT
+
+    cdef MKL_Complex16[:,::1] rho2d_mkl = rho2d #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+    cdef MKL_Complex16[:,::1] out1_mkl = out1 #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
 
 #    double_complex_to_MKL_Complex16_2d(&x_mkl[0,0],&rho2d[0,0],nrows,nrows)
 #    double_complex_to_MKL_Complex16_2d(&y_mkl[0,0],&out1[0,0],nrows,nrows)
-    mkl_sparse_z_mm(operation,alpha,A_mkl,descr,layout,&x_mkl[0,0],nrows,nrows,beta,&y_mkl[0,0],nrows)
+    mkl_sparse_z_mm(H0KKps_operation,alpha,H0KKps_mkl,H0KKps_descr,H0KKps_layout,&rho2d_mkl[0,0],nrows,nrows,beta,&out1_mkl[0,0],nrows)
 #    MKL_Complex16_to_double_complex_2d(&y_mkl[0,0],&out1[0,0],nrows,nrows) 
-    out1 =  np.ascontiguousarray(y_mkl,dtype=complex)
+#    out1 =  np.ascontiguousarray(out1_mkl,dtype=complex)
 
 
     #compute the product rho2d*K in its adjoint form,i.e.,(rho2d*K).dag()=K*rho2d
     cdef cnp.ndarray[complex, ndim=2, mode="c"] out2 = \
         np.zeros((nrows,nrows), dtype=complex,order='c')
-    spmm_c_mkl(Kdata,Kind,Kindptr,nrows,nrows,&rho2d[0,0],&out2[0,0])
+#    spmm_c_mkl(Kdata,Kind,Kindptr,nrows,nrows,&rho2d[0,0],&out2[0,0])
+    #Now Let's expand this function here.
+    cdef sparse_matrix_t K_mkl
+    cdef sparse_operation_t K_operation
+    cdef sparse_layout_t K_layout
+    cdef matrix_descr K_descr
+    cdef MKL_Complex16[::1] Kdata_mkl = np.ascontiguousarray(Kdata,dtype=complex)
+    K_mkl = to_mkl_matrix(Kdata_mkl,Kind,Kindptr,nrows,nrows)
+    K_operation = SPARSE_OPERATION_NON_TRANSPOSE
+    K_layout = SPARSE_LAYOUT_ROW_MAJOR
+    K_descr.type = SPARSE_MATRIX_TYPE_GENERAL
+    K_descr.diag = SPARSE_DIAG_NON_UNIT
+
+#    cdef MKL_Complex16[:,::1] rho2d_mkl = rho2d #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+    cdef MKL_Complex16[:,::1] out2_mkl = out2 #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+
+    mkl_sparse_z_mm(K_operation,alpha,K_mkl,K_descr,K_layout,&rho2d_mkl[0,0],nrows,nrows,beta,&out2_mkl[0,0],nrows)
+    out2 =  np.ascontiguousarray(out2_mkl,dtype=complex)
+
     ##Calculate Kp*rho2d*K
     cdef cnp.ndarray[complex, ndim=2, mode="c"] AdjointOut2 = \
          np.ascontiguousarray(np.transpose(out2).conjugate(),dtype=complex)
-    spmm_c_mkl(Kpdata,Kpind,Kpindptr,nrows,nrows,&AdjointOut2[0,0],&out1[0,0])
+#    spmm_c_mkl(Kpdata,Kpind,Kpindptr,nrows,nrows,&AdjointOut2[0,0],&out1[0,0])
+    #Now Let's expand this function here.
+    cdef sparse_matrix_t Kp_mkl
+    cdef sparse_operation_t Kp_operation
+    cdef sparse_layout_t Kp_layout
+    cdef matrix_descr Kp_descr
+    cdef MKL_Complex16[::1] Kpdata_mkl = np.ascontiguousarray(Kpdata,dtype=complex)
+    Kp_mkl = to_mkl_matrix(Kpdata_mkl,Kpind,Kpindptr,nrows,nrows)
+    Kp_operation = SPARSE_OPERATION_NON_TRANSPOSE
+    Kp_layout = SPARSE_LAYOUT_ROW_MAJOR
+    Kp_descr.type = SPARSE_MATRIX_TYPE_GENERAL
+    Kp_descr.diag = SPARSE_DIAG_NON_UNIT
+
+    cdef MKL_Complex16[:,::1] AdjointOut2_mkl = AdjointOut2 #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+#    cdef MKL_Complex16[:,::1] out1_mkl = out1 #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+
+    mkl_sparse_z_mm(Kp_operation,alpha,Kp_mkl,Kp_descr,Kp_layout,&AdjointOut2_mkl[0,0],nrows,nrows,beta,&out1_mkl[0,0],nrows)
+    out1 =  np.ascontiguousarray(out1_mkl,dtype=complex)
+
     #compute the adjoint of out1 and add it to out1
     cdef cnp.ndarray[complex, ndim=2, mode="c"] AdjointOut1 = \
          np.ascontiguousarray(np.transpose(out1).conjugate(),dtype=complex)
     cdef cnp.ndarray[complex, ndim=2, mode="c"] out3 = out1 + AdjointOut1
     cdef cnp.ndarray[complex, ndim=1, mode="c"] out4 = \
-        out3.T.reshape(nrows*nrows,order='c')
+        out3.reshape(nrows*nrows,order='c')
     return out4
 
 def cy_ode_rhs_single_aop_mkl_v2_sentinel():
     pass
+
+@cython.binding(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef void run_cy_ode_rhs_single_aop(
+        double t,
+        complex[::1] rho,
+        int nrows,
+        complex[::1] H0KKpsdata,
+        int[::1] H0KKpsind,
+        int[::1] H0KKpsindptr,
+        complex[::1] Kdata,
+        int[::1] Kind,
+        int[::1] Kindptr,
+        complex[::1] Kpdata,
+        int[::1] Kpind,
+        int[::1] Kpindptr,
+        int N):
+    cdef size_t ii=0
+    cdef cnp.ndarray[complex, ndim=1, mode="c"] arr
+    while ii < N:
+        arr = cy_ode_rhs_single_aop(t,rho,nrows,H0KKpsdata,H0KKpsind,H0KKpsindptr,Kdata,Kind,Kindptr,Kpdata,Kpind,Kpindptr)
+        ii += 1
+
+def run_cy_ode_rhs_single_aop_sentinel():
+    pass
+
 
 @cython.binding(True)
 @cython.boundscheck(False)
@@ -458,12 +611,167 @@ cpdef void run_cy_ode_rhs_single_aop_mkl(
         int N):
     cdef size_t ii=0
     cdef cnp.ndarray[complex, ndim=1, mode="c"] arr
-    arr = cy_ode_rhs_single_aop_mkl(t,rho,nrows,H0KKpsdata,H0KKpsind,H0KKpsindptr,Kdata,Kind,Kindptr,Kpdata,Kpind,Kpindptr)
-    arr = cy_ode_rhs_single_aop_mkl(t,rho,nrows,H0KKpsdata,H0KKpsind,H0KKpsindptr,Kdata,Kind,Kindptr,Kpdata,Kpind,Kpindptr)
-
     while ii < N:
         arr = cy_ode_rhs_single_aop_mkl(t,rho,nrows,H0KKpsdata,H0KKpsind,H0KKpsindptr,Kdata,Kind,Kindptr,Kpdata,Kpind,Kpindptr)
         ii += 1
 
 def run_cy_ode_rhs_single_aop_mkl_sentinel():
     pass
+
+@cython.binding(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef void run_cy_ode_rhs_single_aop_mkl_v2(
+        double t,
+        complex[::1] rho,
+        int nrows,
+        complex[::1] H0KKpsdata,
+        int[::1] H0KKpsind,
+        int[::1] H0KKpsindptr,
+        complex[::1] Kdata,
+        int[::1] Kind,
+        int[::1] Kindptr,
+        complex[::1] Kpdata,
+        int[::1] Kpind,
+        int[::1] Kpindptr,
+        int N):
+    cdef size_t ii=0
+    cdef cnp.ndarray[complex, ndim=1, mode="c"] arr
+    while ii < N:
+        arr = cy_ode_rhs_single_aop_mkl_v2(t,rho,nrows,H0KKpsdata,H0KKpsind,H0KKpsindptr,Kdata,Kind,Kindptr,Kpdata,Kpind,Kpindptr)
+        ii += 1
+
+def run_cy_ode_rhs_single_aop_mkl_v2_sentinel():
+    pass
+
+@cython.binding(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef cnp.ndarray[complex, ndim=1, mode="c"] cy_ode_rhs_single_aop_mkl_v3(
+        double t,
+        complex[::1] rho,
+        int nrows,
+        complex[::1] H0KKpsdata,
+        int[::1] H0KKpsind,
+        int[::1] H0KKpsindptr,
+        complex[::1] Kdata,
+        int[::1] Kind,
+        int[::1] Kindptr,
+        complex[::1] Kpdata,
+        int[::1] Kpind,
+        int[::1] Kpindptr):
+    cdef MKL_Complex16 alpha
+    alpha.real = 1.0
+    alpha.imag = 0.0
+    cdef MKL_Complex16 beta
+    beta.real = 1.0
+    beta.imag = 0.0
+
+    cdef sparse_operation_t operation
+    cdef sparse_layout_t layout
+    cdef matrix_descr descr
+    operation = SPARSE_OPERATION_NON_TRANSPOSE
+    layout = SPARSE_LAYOUT_ROW_MAJOR
+    descr.type = SPARSE_MATRIX_TYPE_GENERAL
+    descr.diag = SPARSE_DIAG_NON_UNIT
+
+#    #reshape the 1d rho into 2d rho,the 1d rho here has been in c-order, 
+#    cdef cnp.ndarray[complex, ndim=2, mode="c"] rho2d = \
+#        np.asarray(rho,dtype=complex,order='c').reshape((nrows,nrows),order='c')
+#
+#    #1st multiplication: compute the product of -iH0-KKp with rho2d
+#    cdef cnp.ndarray[complex, ndim=2, mode="c"] out1 = \
+#        np.zeros((nrows,nrows), dtype=complex,order='c')
+
+    #1st multiplication: compute the product of -iH0-KKp with rho2d
+
+    #spmm_c_mkl(H0KKpsdata,H0KKpsind,H0KKpsindptr,nrows,nrows,&rho2d[0,0],&out1[0,0])
+    #Now Let's expand this function here.
+    cdef sparse_matrix_t H0KKps_mkl
+    cdef MKL_Complex16[::1] H0KKpsdata_mkl = np.ascontiguousarray(H0KKpsdata,dtype=complex)
+    H0KKps_mkl = to_mkl_matrix(H0KKpsdata_mkl,H0KKpsind,H0KKpsindptr,nrows,nrows)
+#    cdef MKL_Complex16[:,::1] rho2d_mkl = rho2d 
+#    cdef MKL_Complex16[:,::1] out1_mkl = out1 
+    #reshape the 1d rho into 2d rho,the 1d rho here has been in c-order, 
+    cdef MKL_Complex16[:,::1] rho2d_mkl = \
+        np.asarray(rho,dtype=complex,order='c').reshape((nrows,nrows),order='c')
+    cdef MKL_Complex16[:,::1] out1_mkl = \
+        np.zeros((nrows,nrows), dtype=complex,order='c')
+
+    mkl_sparse_z_mm(operation,alpha,H0KKps_mkl,descr,layout,&rho2d_mkl[0,0],nrows,nrows,beta,&out1_mkl[0,0],nrows)
+    #free up memory
+#    PyDataMem_FREE(&H0KKpsdata_mkl[0])
+#    mkl_sparse_destroy(H0KKps_mkl)
+#    out1 =  np.ascontiguousarray(out1_mkl,dtype=complex)
+
+
+    #compute the product rho2d*K in its adjoint form,i.e.,(rho2d*K).dag()=K*rho2d
+#    cdef cnp.ndarray[complex, ndim=2, mode="c"] out2 = \
+#        np.zeros((nrows,nrows), dtype=complex,order='c')
+#    spmm_c_mkl(Kdata,Kind,Kindptr,nrows,nrows,&rho2d[0,0],&out2[0,0])
+    #Now Let's expand this function here.
+    cdef sparse_matrix_t K_mkl
+    cdef MKL_Complex16[::1] Kdata_mkl = np.ascontiguousarray(Kdata,dtype=complex)
+    K_mkl = to_mkl_matrix(Kdata_mkl,Kind,Kindptr,nrows,nrows)
+#    cdef MKL_Complex16[:,::1] rho2d_mkl = rho2d #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+    cdef MKL_Complex16[:,::1] out2_mkl = \
+        np.zeros((nrows,nrows), dtype=complex,order='c')#out2 #np.zeros((nrows,nrows), dtype=np.complex128,order='c')
+
+    mkl_sparse_z_mm(operation,alpha,K_mkl,descr,layout,&rho2d_mkl[0,0],nrows,nrows,beta,&out2_mkl[0,0],nrows)
+#    out2 =  np.ascontiguousarray(out2_mkl,dtype=complex)
+    #Free up memory
+#    PyDataMem_FREE(&Kdata_mkl[0])
+#    mkl_sparse_destroy(K_mkl)
+
+    ##Calculate Kp*rho2d*K
+#    cdef cnp.ndarray[complex, ndim=2, mode="c"] AdjointOut2 = \
+#         np.ascontiguousarray(np.transpose(out2).conjugate(),dtype=complex)
+#    spmm_c_mkl(Kpdata,Kpind,Kpindptr,nrows,nrows,&AdjointOut2[0,0],&out1[0,0])
+    #Now Let's expand this function here.
+    cdef sparse_matrix_t Kp_mkl
+    cdef MKL_Complex16[::1] Kpdata_mkl = np.ascontiguousarray(Kpdata,dtype=complex)
+    Kp_mkl = to_mkl_matrix(Kpdata_mkl,Kpind,Kpindptr,nrows,nrows)
+
+    cdef MKL_Complex16[:,::1] AdjointOut2_mkl = np.zeros((nrows,nrows), dtype=complex,order='c')
+    cdef char ordering = b'R'
+    cdef char trans = b'C'
+    mkl_zomatcopy(ordering, trans, nrows, nrows, alpha,&out2_mkl[0,0],nrows,&AdjointOut2_mkl[0,0],nrows)
+
+    #the out1_mkl = Kp*rho2d*K+out1_mkl=Kp*rho2d*K+H0KKps*rho2d
+    mkl_sparse_z_mm(operation,alpha,Kp_mkl,descr,layout,&AdjointOut2_mkl[0,0],nrows,nrows,beta,&out1_mkl[0,0],nrows)
+#    PyDataMem_FREE(&Kpdata_mkl[0])
+#    PyDataMem_FREE(&out2_mkl[0,0])
+#    PyDataMem_FREE(&AdjointOut2_mkl[0,0])
+#    mkl_sparse_destroy(Kp_mkl)
+##NOTE: AdjointOut2 maybe reused later.
+
+#    out1 =  np.ascontiguousarray(out1_mkl,dtype=complex)
+
+    #compute the adjoint of out1 and add it to out1
+#    cdef cnp.ndarray[complex, ndim=2, mode="c"] AdjointOut1 = \
+#         np.ascontiguousarray(np.transpose(out1).conjugate(),dtype=complex)
+    cdef MKL_Complex16[:,::1] out3_mkl = np.zeros((nrows,nrows), dtype=complex,order='c')
+    cdef MKL_Complex16[:,::1] AdjointOut1_mkl = np.zeros((nrows,nrows), dtype=complex,order='c')
+    #Compute the adjoint of out1_mkl
+    mkl_zomatcopy(ordering, trans, nrows, nrows, alpha,&out1_mkl[0,0],nrows,&AdjointOut1_mkl[0,0],nrows)
+    
+    #Add up out1_mkl and out1, store the result in out3_mkl
+    cdef char transa = b'N'
+    cdef char transb = b'N'
+    mkl_zomatadd(ordering,transa,transb,nrows,nrows,alpha,&out1_mkl[0,0],nrows,\
+                 beta,&AdjointOut1_mkl[0,0],nrows,&out3_mkl[0,0],nrows)
+
+    #Convert out3_mkl back to compelx type, reshape it to 1d array and store it in out4
+    cdef cnp.ndarray[complex, ndim=1, mode="c"] out4 = \
+        np.asarray(out3_mkl,dtype=complex,order='c').reshape(nrows*nrows,order='c')
+    
+    #Free up memory
+#    PyDataMem_FREE(&out3_mkl[0,0])
+#    PyDataMem_FREE(&AdjointOut1_mkl[0,0])
+#    PyDataMem_FREE(&out1_mkl[0,0])
+    return out4
+
+def cy_ode_rhs_single_aop_mkl_v3_sentinel():
+    pass
+
+
