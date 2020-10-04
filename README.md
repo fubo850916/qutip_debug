@@ -1,5 +1,9 @@
-# qutip_debug
+This is simplied version for profiling the redfield sovler.
 
-##run the code as follows
+In order to run this example properly, python3.5, numpy and line_profiled are needed. Then you can run the example as:
+
+```python
 python setup.py build_ext --inplace
+
 python test.py
+```
