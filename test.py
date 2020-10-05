@@ -7,6 +7,11 @@ os.environ["CPPFLAGS"] = os.getenv("CPPFLAGS", "") + "-I" + np.get_include()
 import line_profiler
 import pickle
 import pstats, cProfile
+from cy_ode import cy_ode_rhs_single_aop, run_cy_ode_rhs_single_aop
+from cy_ode import cy_ode_rhs_single_aop_mkl, run_cy_ode_rhs_single_aop_mkl
+from cy_ode import cy_ode_rhs_single_aop_mkl_v2, cy_ode_rhs_single_aop_mkl_v3,run_cy_ode_rhs_single_aop_mkl_v2
+
+
 
 def assert_stats(profile, name):
     profile.print_stats()
@@ -20,9 +25,7 @@ def assert_stats(profile, name):
         raise ValueError("No stats for %s." % name)
 
 
-from cy_ode import cy_ode_rhs_single_aop_mkl,run_cy_ode_rhs_single_aop_mkl
-from cy_ode import cy_ode_rhs_single_aop_mkl_v2
-
+##load the required matrix by cy_ode_rhs, all are generated in qutip.
 a_eb_ops_data = pickle.load(open("a_eb_ops_data","rb"))
 print(len(a_eb_ops_data))
 a_eb_ops_indices = pickle.load(open("a_eb_ops_indices","rb"))
@@ -39,17 +42,20 @@ init_vec = pickle.load(open("init_vec","rb"))
 nrows = int(np.sqrt(init_vec.shape[0]))
 
 
-
-
 #func = cy_ode_rhs_single_aop_mkl_v2
 func1 = cy_ode_rhs_single_aop_mkl
 func2 = run_cy_ode_rhs_single_aop_mkl
+func3 = cy_ode_rhs_single_aop_mkl_v2
+func4 = cy_ode_rhs_single_aop_mkl_v3
+func5 = cy_ode_rhs_single_aop
+func6 = run_cy_ode_rhs_single_aop
 
+
+#run the calculation for MKL initialization.
 run_cy_ode_rhs_single_aop_mkl(0,init_vec,nrows,H0KKps_data, H0KKps_indices, H0KKps_indptr,a_eb_ops_data, a_eb_ops_indices, a_eb_ops_indptr,Kp_data, Kp_indices, Kp_indptr,2)
 
-profile1 = line_profiler.LineProfiler(func1)
-profile2 = line_profiler.LineProfiler(func2)
 
+profile1 = line_profiler.LineProfiler(func1)
 profile1.runcall(func1,
                 0,
                 init_vec,
@@ -57,20 +63,28 @@ profile1.runcall(func1,
                 H0KKps_data, H0KKps_indices, H0KKps_indptr,
                 a_eb_ops_data, a_eb_ops_indices, a_eb_ops_indptr, #K
                 Kp_data, Kp_indices, Kp_indptr)
-profile2.runcall(func2,
+assert_stats(profile1,func1.__name__) 
+
+profile5 = line_profiler.LineProfiler(func5)
+profile5.runcall(func5,
                 0,
                 init_vec,
                 nrows,
                 H0KKps_data, H0KKps_indices, H0KKps_indptr,
                 a_eb_ops_data, a_eb_ops_indices, a_eb_ops_indptr, #K
-                Kp_data, Kp_indices, Kp_indptr,3)
+                Kp_data, Kp_indices, Kp_indptr)
+assert_stats(profile5,func5.__name__) 
 
-assert_stats(profile1,func1.__name__) 
-assert_stats(profile2,func2.__name__) 
+##Check the accuracy between different versions
+#test1 =  cy_ode_rhs_single_aop_mkl(0,init_vec,nrows,H0KKps_data, H0KKps_indices, H0KKps_indptr,a_eb_ops_data, a_eb_ops_indices, a_eb_ops_indptr,Kp_data, Kp_indices, Kp_indptr)
+#
+#test2 =  cy_ode_rhs_single_aop_mkl_v3(0,init_vec,nrows,H0KKps_data, H0KKps_indices, H0KKps_indptr,a_eb_ops_data, a_eb_ops_indices, a_eb_ops_indptr,Kp_data, Kp_indices, Kp_indptr)
+#
+#res1 = np.allclose(test1,test2)
+#print(res1)
 
 
-
-
-cProfile.runctx("run_cy_ode_rhs_single_aop_mkl(0,init_vec,nrows,H0KKps_data, H0KKps_indices, H0KKps_indptr,a_eb_ops_data, a_eb_ops_indices, a_eb_ops_indptr,Kp_data, Kp_indices, Kp_indptr,2000)",globals(),locals(),"Profile.prof")
-s = pstats.Stats("Profile.prof")
-s.strip_dirs().sort_stats("time").print_stats()
+##Print statistics
+#cProfile.runctx("run_cy_ode_rhs_single_aop_mkl_v2(0,init_vec,nrows,H0KKps_data, H0KKps_indices, H0KKps_indptr,a_eb_ops_data, a_eb_ops_indices, a_eb_ops_indptr,Kp_data, Kp_indices, Kp_indptr,2000)",globals(),locals(),"Profile.prof")
+#s = pstats.Stats("Profile.prof")
+#s.strip_dirs().sort_stats("time").print_stats()
